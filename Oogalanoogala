@@ -1,22 +1,19 @@
--- Delta Executor: Full Pose Editor + Saved Poses Menu + Camera Interaction Lock
+-- Delta Executor: Full Pose Editor (Fixed Auto-Load Bug)
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- 1. CLEAN UP PREVIOUS RUNS
 if CoreGui:FindFirstChild("PoseEditor_Final") then
     CoreGui.PoseEditor_Final:Destroy()
 end
 
--- 2. CORE SCREEN LAYER
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "PoseEditor_Final"
 pcall(function() ScreenGui.Parent = CoreGui end)
 if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
--- Global States
 local selectedLimbName = nil
 local currentToolMode = "Rotate"
 local active3DHandle = nil
@@ -28,14 +25,9 @@ local function getCharacter()
     return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 end
 
--- DATA PERSISTENCE LAYER
+-- DATA PERSISTENCE LAYER (Strictly separates loading from saving)
 local function loadSavedData()
-    local defaultData = {
-        ["Universal knees"] = nil,
-        ["Universal surrender"] = nil,
-        ["Man wait"] = nil,
-        ["man tuff"] = nil
-    }
+    local defaultData = {}
     if readfile then
         local success, content = pcall(readfile, FILE_NAME)
         if success and content then
@@ -85,11 +77,11 @@ function update3DHandles()
         arcs.MouseButton1Down:Connect(function() 
             if motor then 
                 startC0 = motor.C0 
-                lockCamera() -- Prevents camera pan on drag begin
+                lockCamera()
             end 
         end)
         
-        arcs.MouseButton1Up:Connect(unlockCamera) -- Restores panning on drop
+        arcs.MouseButton1Up:Connect(unlockCamera)
 
         arcs.MouseAxisChanged:Connect(function(axis, relativeAngle)
             if motor and startC0 then
@@ -111,11 +103,11 @@ function update3DHandles()
         arrows.MouseButton1Down:Connect(function() 
             if motor then 
                 startC0 = motor.C0 
-                lockCamera() -- Prevents camera pan on drag begin
+                lockCamera()
             end 
         end)
         
-        arrows.MouseButton1Up:Connect(unlockCamera) -- Restores panning on drop
+        arrows.MouseButton1Up:Connect(unlockCamera)
 
         arrows.MouseDrag:Connect(function(face, distance)
             if motor and startC0 then
@@ -126,7 +118,7 @@ function update3DHandles()
 end
 
 -- ==========================================
--- 4. PRIMARY BUILDER PANEL (R6 Selection)
+-- 4. PRIMARY BUILDER PANEL
 -- ==========================================
 local MainFrame = Instance.new("Frame")
 MainFrame.Size = UDim2.new(0, 260, 0, 420)
@@ -165,7 +157,6 @@ local RightArmBtn  = createLimbButton("Right Arm", Color3.fromRGB(245, 205, 48),
 local LeftLegBtn   = createLimbButton("Left Leg", Color3.fromRGB(164, 189, 72), UDim2.new(0, 32, 0, 90), UDim2.new(0, 75, 0, 150))
 local RightLegBtn  = createLimbButton("Right Leg", Color3.fromRGB(164, 189, 72), UDim2.new(0, 32, 0, 90), UDim2.new(0, 113, 0, 150))
 
--- ACTION CONTROLS
 local RotateToggle = Instance.new("ImageButton")
 RotateToggle.Size = UDim2.new(0, 45, 0, 45)
 RotateToggle.Position = UDim2.new(0, 20, 0, 270)
@@ -215,7 +206,7 @@ for _, obj in pairs({RotateToggle, MoveToggle, ResetBtn, ApplyBtn, OverrideToggl
 end
 
 -- ==========================================
--- 5. "SAVED POSES" LAUNCH CONTAINER
+-- 5. "SAVED POSES" LAUNCH BUTTON
 -- ==========================================
 local SavedPosesLaunchBtn = Instance.new("TextButton")
 SavedPosesLaunchBtn.Size = UDim2.new(0, 140, 0, 45)
@@ -229,7 +220,7 @@ SavedPosesLaunchBtn.Parent = MainFrame
 local slCorner = Instance.new("UICorner") slCorner.CornerRadius = UDim.new(0, 12) slCorner.Parent = SavedPosesLaunchBtn
 
 -- ==========================================
--- 6. PRESET GRID OVERLAY MENU
+-- 6. PRESET GRID OVERLAY MENU (Fixed Grid Structure)
 -- ==========================================
 local PresetMenu = Instance.new("Frame")
 PresetMenu.Size = UDim2.new(0, 320, 0, 360)
@@ -356,11 +347,13 @@ local function renderPresetGrid()
         ActButton.Text = ""
         ActButton.Parent = SlotFrame
 
+        -- FIXED INPUT ACTION HANDLER (No automatic manipulation)
         ActButton.MouseButton1Click:Connect(function()
             if poseDatabase[name] then
                 applySerializedPose(poseDatabase[name])
                 update3DHandles()
             else
+                -- Click empty slot to save your current custom pose
                 poseDatabase[name] = serializePose()
                 saveToStorage(poseDatabase)
                 renderPresetGrid()
@@ -368,6 +361,7 @@ local function renderPresetGrid()
         end)
 
         ActButton.MouseButton2Click:Connect(function()
+            -- Force overwrite on right click / hold selection
             poseDatabase[name] = serializePose()
             saveToStorage(poseDatabase)
             renderPresetGrid()
@@ -381,7 +375,7 @@ SavedPosesLaunchBtn.MouseButton1Click:Connect(function() PresetMenu.Visible = tr
 CloseMenuBtn.MouseButton1Click:Connect(function() PresetMenu.Visible = false end)
 
 -- ==========================================
--- 7. CONNECTIONS & WRAPPERS
+-- 7. CONNECTIONS & UTILITIES
 -- ==========================================
 RotateToggle.MouseButton1Click:Connect(function()
     currentToolMode = "Rotate"
@@ -470,3 +464,4 @@ OverrideToggle.MouseButton1Click:Connect(function()
         end
     end
 end)
+
