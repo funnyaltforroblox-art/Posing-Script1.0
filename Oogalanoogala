@@ -1,9 +1,9 @@
--- Delta Executor: Interactive Pose Editor with Save Presets Menu
+-- Delta Executor: Full Pose Editor + Saved Poses Menu + Camera Interaction Lock
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
-local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
 
 -- 1. CLEAN UP PREVIOUS RUNS
 if CoreGui:FindFirstChild("PoseEditor_Final") then
@@ -28,7 +28,7 @@ local function getCharacter()
     return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 end
 
--- DATA PERSISTENCE LAYER (Uses executor file-system functions if available)
+-- DATA PERSISTENCE LAYER
 local function loadSavedData()
     local defaultData = {
         ["Universal knees"] = nil,
@@ -55,8 +55,16 @@ end
 local poseDatabase = loadSavedData()
 
 -- ==========================================
--- 3. INTERACTIVE 3D MANIPULATION HANDLES
+-- 3. INTERACTIVE 3D MANIPULATION HANDLES WITH CAMERA LOCK
 -- ==========================================
+local function lockCamera()
+    Camera.CameraType = Enum.CameraType.Scriptable
+end
+
+local function unlockCamera()
+    Camera.CameraType = Enum.CameraType.Custom
+end
+
 function update3DHandles()
     if active3DHandle then active3DHandle:Destroy() active3DHandle = nil end
     if not selectedLimbName then return end
@@ -74,7 +82,15 @@ function update3DHandles()
         active3DHandle = arcs
 
         local startC0 = nil
-        arcs.MouseButton1Down:Connect(function() if motor then startC0 = motor.C0 end end)
+        arcs.MouseButton1Down:Connect(function() 
+            if motor then 
+                startC0 = motor.C0 
+                lockCamera() -- Prevents camera pan on drag begin
+            end 
+        end)
+        
+        arcs.MouseButton1Up:Connect(unlockCamera) -- Restores panning on drop
+
         arcs.MouseAxisChanged:Connect(function(axis, relativeAngle)
             if motor and startC0 then
                 if axis == Enum.Axis.X then motor.C0 = startC0 * CFrame.Angles(relativeAngle, 0, 0)
@@ -82,6 +98,7 @@ function update3DHandles()
                 elseif axis == Enum.Axis.Z then motor.C0 = startC0 * CFrame.Angles(0, 0, relativeAngle) end
             end
         end)
+        
     elseif currentToolMode == "Move" then
         local arrows = Instance.new("Handles")
         arrows.Color3 = Color3.fromRGB(0, 180, 255)
@@ -91,7 +108,15 @@ function update3DHandles()
         active3DHandle = arrows
 
         local startC0 = nil
-        arrows.MouseButton1Down:Connect(function() if motor then startC0 = motor.C0 end end)
+        arrows.MouseButton1Down:Connect(function() 
+            if motor then 
+                startC0 = motor.C0 
+                lockCamera() -- Prevents camera pan on drag begin
+            end 
+        end)
+        
+        arrows.MouseButton1Up:Connect(unlockCamera) -- Restores panning on drop
+
         arrows.MouseDrag:Connect(function(face, distance)
             if motor and startC0 then
                 motor.C0 = startC0 * CFrame.new(Vector3.FromNormalId(face) * distance)
@@ -101,7 +126,7 @@ function update3DHandles()
 end
 
 -- ==========================================
--- 4. PRIMARY BUILDER PANEL (UI Image 1 Structure)
+-- 4. PRIMARY BUILDER PANEL (R6 Selection)
 -- ==========================================
 local MainFrame = Instance.new("Frame")
 MainFrame.Size = UDim2.new(0, 260, 0, 420)
@@ -140,7 +165,7 @@ local RightArmBtn  = createLimbButton("Right Arm", Color3.fromRGB(245, 205, 48),
 local LeftLegBtn   = createLimbButton("Left Leg", Color3.fromRGB(164, 189, 72), UDim2.new(0, 32, 0, 90), UDim2.new(0, 75, 0, 150))
 local RightLegBtn  = createLimbButton("Right Leg", Color3.fromRGB(164, 189, 72), UDim2.new(0, 32, 0, 90), UDim2.new(0, 113, 0, 150))
 
--- ACTION SYSTEM UTILITIES
+-- ACTION CONTROLS
 local RotateToggle = Instance.new("ImageButton")
 RotateToggle.Size = UDim2.new(0, 45, 0, 45)
 RotateToggle.Position = UDim2.new(0, 20, 0, 270)
@@ -190,7 +215,7 @@ for _, obj in pairs({RotateToggle, MoveToggle, ResetBtn, ApplyBtn, OverrideToggl
 end
 
 -- ==========================================
--- 5. "SAVED POSES" LAUNCH CONTAINER (Image 4)
+-- 5. "SAVED POSES" LAUNCH CONTAINER
 -- ==========================================
 local SavedPosesLaunchBtn = Instance.new("TextButton")
 SavedPosesLaunchBtn.Size = UDim2.new(0, 140, 0, 45)
@@ -204,7 +229,7 @@ SavedPosesLaunchBtn.Parent = MainFrame
 local slCorner = Instance.new("UICorner") slCorner.CornerRadius = UDim.new(0, 12) slCorner.Parent = SavedPosesLaunchBtn
 
 -- ==========================================
--- 6. PRESET MODAL OVERLAY MENU (Image 5 Layout)
+-- 6. PRESET GRID OVERLAY MENU
 -- ==========================================
 local PresetMenu = Instance.new("Frame")
 PresetMenu.Size = UDim2.new(0, 320, 0, 360)
@@ -252,7 +277,6 @@ UIGridLayout.CellSize = UDim2.new(0, 135, 0, 135)
 UIGridLayout.CellPadding = UDim2.new(0, 15, 0, 15)
 UIGridLayout.Parent = GridContainer
 
--- ENGINE TRANSFORMATION MATRICES SERIALIZATION
 local function serializePose()
     local poseData = {}
     local char = getCharacter()
@@ -285,7 +309,6 @@ local function applySerializedPose(poseData)
     end
 end
 
--- GENERATE INTERACTIVE SLOT TILES DYNAMICALLY
 local function renderPresetGrid()
     for _, child in pairs(GridContainer:GetChildren()) do
         if child:IsA("Frame") then child:Destroy() end
@@ -300,7 +323,6 @@ local function renderPresetGrid()
         SlotFrame.Parent = GridContainer
         local sfCorner = Instance.new("UICorner") sfCorner.CornerRadius = UDim.new(0, 12) sfCorner.Parent = SlotFrame
 
-        -- Inner Placeholder visualization frame
         local VisualBox = Instance.new("Frame")
         VisualBox.Size = UDim2.new(1, -20, 0, 75)
         VisualBox.Position = UDim2.new(0, 10, 0, 10)
@@ -311,7 +333,7 @@ local function renderPresetGrid()
         local InnerLabel = Instance.new("TextLabel")
         InnerLabel.Size = UDim2.new(1, 0, 1, 0)
         InnerLabel.BackgroundTransparency = 1
-        InnerLabel.Text = dataExists and "Pose Content Active" or "[Empty Slot]"
+        InnerLabel.Text = dataExists and "Pose Active" or "[Empty]"
         InnerLabel.TextColor3 = dataExists and Color3.fromRGB(100, 150, 100) or Color3.fromRGB(100, 100, 100)
         InnerLabel.Font = Enum.Font.SourceSansItalic
         InnerLabel.TextSize = 12
@@ -326,10 +348,8 @@ local function renderPresetGrid()
         NameLabel.Font = Enum.Font.SourceSansBold
         NameLabel.TextSize = 13
         NameLabel.TextWrapped = true
-        NameLabel.TextYAlignment = Enum.TextYAlignment.Center
         NameLabel.Parent = SlotFrame
 
-        -- Click Actions: Click background tile to load, Hold with a button to overwrite save data
         local ActButton = Instance.new("TextButton")
         ActButton.Size = UDim2.new(1, 0, 1, 0)
         ActButton.BackgroundTransparency = 1
@@ -341,14 +361,12 @@ local function renderPresetGrid()
                 applySerializedPose(poseDatabase[name])
                 update3DHandles()
             else
-                -- Auto-Save current form if space is empty
                 poseDatabase[name] = serializePose()
                 saveToStorage(poseDatabase)
                 renderPresetGrid()
             end
         end)
 
-        -- Context Menu Alternative: Long press or secondary utility right-click option to force write save overrides
         ActButton.MouseButton2Click:Connect(function()
             poseDatabase[name] = serializePose()
             saveToStorage(poseDatabase)
@@ -359,17 +377,11 @@ end
 
 renderPresetGrid()
 
--- MENU SWITCH CONNECTIONS
-SavedPosesLaunchBtn.MouseButton1Click:Connect(function()
-    PresetMenu.Visible = true
-end)
-
-CloseMenuBtn.MouseButton1Click:Connect(function()
-    PresetMenu.Visible = false
-end)
+SavedPosesLaunchBtn.MouseButton1Click:Connect(function() PresetMenu.Visible = true end)
+CloseMenuBtn.MouseButton1Click:Connect(function() PresetMenu.Visible = false end)
 
 -- ==========================================
--- 7. EVENT CONNECTORS & MANAGEMENT UTILITIES
+-- 7. CONNECTIONS & WRAPPERS
 -- ==========================================
 RotateToggle.MouseButton1Click:Connect(function()
     currentToolMode = "Rotate"
