@@ -1,0 +1,460 @@
+-- Delta Executor: Interactive Pose Editor with Save Presets Menu
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+-- 1. CLEAN UP PREVIOUS RUNS
+if CoreGui:FindFirstChild("PoseEditor_Final") then
+    CoreGui.PoseEditor_Final:Destroy()
+end
+
+-- 2. CORE SCREEN LAYER
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "PoseEditor_Final"
+pcall(function() ScreenGui.Parent = CoreGui end)
+if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+-- Global States
+local selectedLimbName = nil
+local currentToolMode = "Rotate"
+local active3DHandle = nil
+local overridesActive = false
+local originalAnims = {}
+local FILE_NAME = "Delta_SavedPoses.json"
+
+local function getCharacter()
+    return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+end
+
+-- DATA PERSISTENCE LAYER (Uses executor file-system functions if available)
+local function loadSavedData()
+    local defaultData = {
+        ["Universal knees"] = nil,
+        ["Universal surrender"] = nil,
+        ["Man wait"] = nil,
+        ["man tuff"] = nil
+    }
+    if readfile then
+        local success, content = pcall(readfile, FILE_NAME)
+        if success and content then
+            local decodedSuccess, decoded = pcall(function() return HttpService:JSONDecode(content) end)
+            if decodedSuccess then return decoded end
+        end
+    end
+    return defaultData
+end
+
+local function saveToStorage(data)
+    if writefile then
+        pcall(writefile, FILE_NAME, HttpService:JSONEncode(data))
+    end
+end
+
+local poseDatabase = loadSavedData()
+
+-- ==========================================
+-- 3. INTERACTIVE 3D MANIPULATION HANDLES
+-- ==========================================
+function update3DHandles()
+    if active3DHandle then active3DHandle:Destroy() active3DHandle = nil end
+    if not selectedLimbName then return end
+    local char = getCharacter()
+    local targetLimb = char:FindFirstChild(selectedLimbName)
+    if not targetLimb or not targetLimb:IsA("BasePart") then return end
+
+    local motor = targetLimb:FindFirstChildOfClass("Motor6D") or char.Torso:FindFirstChild(targetLimb.Name .. "Joint")
+
+    if currentToolMode == "Rotate" then
+        local arcs = Instance.new("ArcHandles")
+        arcs.Color3 = Color3.fromRGB(0, 255, 255)
+        arcs.Adornee = targetLimb
+        arcs.Parent = ScreenGui
+        active3DHandle = arcs
+
+        local startC0 = nil
+        arcs.MouseButton1Down:Connect(function() if motor then startC0 = motor.C0 end end)
+        arcs.MouseAxisChanged:Connect(function(axis, relativeAngle)
+            if motor and startC0 then
+                if axis == Enum.Axis.X then motor.C0 = startC0 * CFrame.Angles(relativeAngle, 0, 0)
+                elseif axis == Enum.Axis.Y then motor.C0 = startC0 * CFrame.Angles(0, relativeAngle, 0)
+                elseif axis == Enum.Axis.Z then motor.C0 = startC0 * CFrame.Angles(0, 0, relativeAngle) end
+            end
+        end)
+    elseif currentToolMode == "Move" then
+        local arrows = Instance.new("Handles")
+        arrows.Color3 = Color3.fromRGB(0, 180, 255)
+        arrows.Style = Enum.HandlesStyle.Movement
+        arrows.Adornee = targetLimb
+        arrows.Parent = ScreenGui
+        active3DHandle = arrows
+
+        local startC0 = nil
+        arrows.MouseButton1Down:Connect(function() if motor then startC0 = motor.C0 end end)
+        arrows.MouseDrag:Connect(function(face, distance)
+            if motor and startC0 then
+                motor.C0 = startC0 * CFrame.new(Vector3.FromNormalId(face) * distance)
+            end
+        end)
+    end
+end
+
+-- ==========================================
+-- 4. PRIMARY BUILDER PANEL (UI Image 1 Structure)
+-- ==========================================
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 260, 0, 420)
+MainFrame.Position = UDim2.new(0.05, 0, 0.25, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner") MainCorner.CornerRadius = UDim.new(0, 12) MainCorner.Parent = MainFrame
+
+local BodyCanvas = Instance.new("Frame")
+BodyCanvas.Size = UDim2.new(0, 220, 0, 240)
+BodyCanvas.Position = UDim2.new(0, 20, 0, 20)
+BodyCanvas.BackgroundTransparency = 1
+BodyCanvas.Parent = MainFrame
+
+local function createLimbButton(name, color, size, pos)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Size = size
+    btn.Position = pos
+    btn.BackgroundColor3 = color
+    btn.BorderSizePixel = 2
+    btn.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    btn.Text = ""
+    btn.Parent = BodyCanvas
+    return btn
+end
+
+local HeadBtn      = createLimbButton("Head", Color3.fromRGB(245, 205, 48), UDim2.new(0, 50, 0, 50), UDim2.new(0, 85, 0, 0))
+local TorsoBtn     = createLimbButton("Torso", Color3.fromRGB(13, 105, 172), UDim2.new(0, 70, 0, 90), UDim2.new(0, 75, 0, 55))
+local LeftArmBtn   = createLimbButton("Left Arm", Color3.fromRGB(245, 205, 48), UDim2.new(0, 32, 0, 90), UDim2.new(0, 38, 0, 55))
+local RightArmBtn  = createLimbButton("Right Arm", Color3.fromRGB(245, 205, 48), UDim2.new(0, 32, 0, 90), UDim2.new(0, 150, 0, 55))
+local LeftLegBtn   = createLimbButton("Left Leg", Color3.fromRGB(164, 189, 72), UDim2.new(0, 32, 0, 90), UDim2.new(0, 75, 0, 150))
+local RightLegBtn  = createLimbButton("Right Leg", Color3.fromRGB(164, 189, 72), UDim2.new(0, 32, 0, 90), UDim2.new(0, 113, 0, 150))
+
+-- ACTION SYSTEM UTILITIES
+local RotateToggle = Instance.new("ImageButton")
+RotateToggle.Size = UDim2.new(0, 45, 0, 45)
+RotateToggle.Position = UDim2.new(0, 20, 0, 270)
+RotateToggle.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+RotateToggle.Image = "rbxassetid://10651139414"
+RotateToggle.Parent = MainFrame
+
+local MoveToggle = Instance.new("ImageButton")
+MoveToggle.Size = UDim2.new(0, 45, 0, 45)
+MoveToggle.Position = UDim2.new(0, 75, 0, 270)
+MoveToggle.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MoveToggle.Image = "rbxassetid://10650511730"
+MoveToggle.Parent = MainFrame
+
+local ResetBtn = Instance.new("TextButton")
+ResetBtn.Size = UDim2.new(0, 65, 0, 32)
+ResetBtn.Position = UDim2.new(0, 20, 0, 325)
+ResetBtn.BackgroundColor3 = Color3.fromRGB(235, 75, 75)
+ResetBtn.Text = "Reset"
+ResetBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ResetBtn.Font = Enum.Font.SourceSansBold
+ResetBtn.TextSize = 16
+ResetBtn.Parent = MainFrame
+
+local ApplyBtn = Instance.new("TextButton")
+ApplyBtn.Size = UDim2.new(0, 140, 0, 32)
+ApplyBtn.Position = UDim2.new(0, 100, 0, 325)
+ApplyBtn.BackgroundColor3 = Color3.fromRGB(60, 220, 130)
+ApplyBtn.Text = "Apply"
+ApplyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ApplyBtn.Font = Enum.Font.SourceSansBold
+ApplyBtn.TextSize = 16
+ApplyBtn.Parent = MainFrame
+
+local OverrideToggle = Instance.new("TextButton")
+OverrideToggle.Size = UDim2.new(0, 220, 0, 32)
+OverrideToggle.Position = UDim2.new(0, 20, 0, 370)
+OverrideToggle.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+OverrideToggle.Text = "Override Anims: OFF"
+OverrideToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+OverrideToggle.Font = Enum.Font.SourceSansBold
+OverrideToggle.TextSize = 14
+OverrideToggle.Parent = MainFrame
+
+for _, obj in pairs({RotateToggle, MoveToggle, ResetBtn, ApplyBtn, OverrideToggle}) do
+    local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = obj
+end
+
+-- ==========================================
+-- 5. "SAVED POSES" LAUNCH CONTAINER (Image 4)
+-- ==========================================
+local SavedPosesLaunchBtn = Instance.new("TextButton")
+SavedPosesLaunchBtn.Size = UDim2.new(0, 140, 0, 45)
+SavedPosesLaunchBtn.Position = UDim2.new(0, 130, 0, 270)
+SavedPosesLaunchBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+SavedPosesLaunchBtn.Text = "Saved Poses"
+SavedPosesLaunchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SavedPosesLaunchBtn.Font = Enum.Font.SourceSansBold
+SavedPosesLaunchBtn.TextSize = 16
+SavedPosesLaunchBtn.Parent = MainFrame
+local slCorner = Instance.new("UICorner") slCorner.CornerRadius = UDim.new(0, 12) slCorner.Parent = SavedPosesLaunchBtn
+
+-- ==========================================
+-- 6. PRESET MODAL OVERLAY MENU (Image 5 Layout)
+-- ==========================================
+local PresetMenu = Instance.new("Frame")
+PresetMenu.Size = UDim2.new(0, 320, 0, 360)
+PresetMenu.Position = UDim2.new(0.5, -160, 0.5, -180)
+PresetMenu.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+PresetMenu.BorderSizePixel = 0
+PresetMenu.Visible = false
+PresetMenu.Active = true
+PresetMenu.Draggable = true
+PresetMenu.Parent = ScreenGui
+
+local pmCorner = Instance.new("UICorner") pmCorner.CornerRadius = UDim.new(0, 14) pmCorner.Parent = PresetMenu
+
+local MenuTitle = Instance.new("TextLabel")
+MenuTitle.Size = UDim2.new(0, 200, 0, 40)
+MenuTitle.Position = UDim2.new(0, 20, 0, 5)
+MenuTitle.BackgroundTransparency = 1
+MenuTitle.Text = "Saved Poses"
+MenuTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+MenuTitle.Font = Enum.Font.SourceSansBold
+MenuTitle.TextSize = 22
+MenuTitle.TextXAlignment = Enum.TextXAlignment.Left
+MenuTitle.Parent = PresetMenu
+
+local CloseMenuBtn = Instance.new("TextButton")
+CloseMenuBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseMenuBtn.Position = UDim2.new(1, -45, 0, 10)
+CloseMenuBtn.BackgroundTransparency = 1
+CloseMenuBtn.Text = "X"
+CloseMenuBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseMenuBtn.Font = Enum.Font.SourceSansBold
+CloseMenuBtn.TextSize = 24
+CloseMenuBtn.Parent = PresetMenu
+
+local GridContainer = Instance.new("ScrollingFrame")
+GridContainer.Size = UDim2.new(1, -30, 1, -60)
+GridContainer.Position = UDim2.new(0, 15, 0, 50)
+GridContainer.BackgroundTransparency = 1
+GridContainer.CanvasSize = UDim2.new(0, 0, 1.2, 0)
+GridContainer.ScrollBarThickness = 4
+GridContainer.Parent = PresetMenu
+
+local UIGridLayout = Instance.new("UIGridLayout")
+UIGridLayout.CellSize = UDim2.new(0, 135, 0, 135)
+UIGridLayout.CellPadding = UDim2.new(0, 15, 0, 15)
+UIGridLayout.Parent = GridContainer
+
+-- ENGINE TRANSFORMATION MATRICES SERIALIZATION
+local function serializePose()
+    local poseData = {}
+    local char = getCharacter()
+    for _, part in pairs(char:GetChildren()) do
+        if part:IsA("BasePart") then
+            local motor = part:FindFirstChildOfClass("Motor6D") or char.Torso:FindFirstChild(part.Name .. "Joint")
+            if motor then
+                local x, y, z = motor.C0:ToEulerAnglesXYZ()
+                poseData[part.Name] = {
+                    Pos = {motor.C0.X, motor.C0.Y, motor.C0.Z},
+                    Rot = {x, y, z}
+                }
+            end
+        end
+    end
+    return poseData
+end
+
+local function applySerializedPose(poseData)
+    if not poseData then return end
+    local char = getCharacter()
+    for limbName, data in pairs(poseData) do
+        local part = char:FindFirstChild(limbName)
+        if part then
+            local motor = part:FindFirstChildOfClass("Motor6D") or char.Torso:FindFirstChild(part.Name .. "Joint")
+            if motor then
+                motor.C0 = CFrame.new(unpack(data.Pos)) * CFrame.Angles(unpack(data.Rot))
+            end
+        end
+    end
+end
+
+-- GENERATE INTERACTIVE SLOT TILES DYNAMICALLY
+local function renderPresetGrid()
+    for _, child in pairs(GridContainer:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+
+    local sortedNames = {"Universal knees", "Universal surrender", "Man wait", "man tuff"}
+    for _, name in pairs(sortedNames) do
+        local dataExists = poseDatabase[name] ~= nil
+
+        local SlotFrame = Instance.new("Frame")
+        SlotFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        SlotFrame.Parent = GridContainer
+        local sfCorner = Instance.new("UICorner") sfCorner.CornerRadius = UDim.new(0, 12) sfCorner.Parent = SlotFrame
+
+        -- Inner Placeholder visualization frame
+        local VisualBox = Instance.new("Frame")
+        VisualBox.Size = UDim2.new(1, -20, 0, 75)
+        VisualBox.Position = UDim2.new(0, 10, 0, 10)
+        VisualBox.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+        VisualBox.Parent = SlotFrame
+        local vbCorner = Instance.new("UICorner") vbCorner.CornerRadius = UDim.new(0, 8) vbCorner.Parent = VisualBox
+
+        local InnerLabel = Instance.new("TextLabel")
+        InnerLabel.Size = UDim2.new(1, 0, 1, 0)
+        InnerLabel.BackgroundTransparency = 1
+        InnerLabel.Text = dataExists and "Pose Content Active" or "[Empty Slot]"
+        InnerLabel.TextColor3 = dataExists and Color3.fromRGB(100, 150, 100) or Color3.fromRGB(100, 100, 100)
+        InnerLabel.Font = Enum.Font.SourceSansItalic
+        InnerLabel.TextSize = 12
+        InnerLabel.Parent = VisualBox
+
+        local NameLabel = Instance.new("TextLabel")
+        NameLabel.Size = UDim2.new(1, -10, 0, 35)
+        NameLabel.Position = UDim2.new(0, 10, 1, -40)
+        NameLabel.BackgroundTransparency = 1
+        NameLabel.Text = name
+        NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        NameLabel.Font = Enum.Font.SourceSansBold
+        NameLabel.TextSize = 13
+        NameLabel.TextWrapped = true
+        NameLabel.TextYAlignment = Enum.TextYAlignment.Center
+        NameLabel.Parent = SlotFrame
+
+        -- Click Actions: Click background tile to load, Hold with a button to overwrite save data
+        local ActButton = Instance.new("TextButton")
+        ActButton.Size = UDim2.new(1, 0, 1, 0)
+        ActButton.BackgroundTransparency = 1
+        ActButton.Text = ""
+        ActButton.Parent = SlotFrame
+
+        ActButton.MouseButton1Click:Connect(function()
+            if poseDatabase[name] then
+                applySerializedPose(poseDatabase[name])
+                update3DHandles()
+            else
+                -- Auto-Save current form if space is empty
+                poseDatabase[name] = serializePose()
+                saveToStorage(poseDatabase)
+                renderPresetGrid()
+            end
+        end)
+
+        -- Context Menu Alternative: Long press or secondary utility right-click option to force write save overrides
+        ActButton.MouseButton2Click:Connect(function()
+            poseDatabase[name] = serializePose()
+            saveToStorage(poseDatabase)
+            renderPresetGrid()
+        end)
+    end
+end
+
+renderPresetGrid()
+
+-- MENU SWITCH CONNECTIONS
+SavedPosesLaunchBtn.MouseButton1Click:Connect(function()
+    PresetMenu.Visible = true
+end)
+
+CloseMenuBtn.MouseButton1Click:Connect(function()
+    PresetMenu.Visible = false
+end)
+
+-- ==========================================
+-- 7. EVENT CONNECTORS & MANAGEMENT UTILITIES
+-- ==========================================
+RotateToggle.MouseButton1Click:Connect(function()
+    currentToolMode = "Rotate"
+    RotateToggle.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    MoveToggle.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    update3DHandles()
+end)
+
+MoveToggle.MouseButton1Click:Connect(function()
+    currentToolMode = "Move"
+    RotateToggle.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    MoveToggle.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    update3DHandles()
+end)
+
+local limbButtons = {
+    ["Head"] = HeadBtn, ["Torso"] = TorsoBtn,
+    ["Left Arm"] = LeftArmBtn, ["Right Arm"] = RightArmBtn,
+    ["Left Leg"] = LeftLegBtn, ["Right Leg"] = RightLegBtn
+}
+
+for limbName, button in pairs(limbButtons) do
+    button.MouseButton1Click:Connect(function()
+        for _, btn in pairs(limbButtons) do btn.BorderColor3 = Color3.fromRGB(0, 0, 0) end
+        button.BorderColor3 = Color3.fromRGB(0, 255, 255)
+        selectedLimbName = limbName
+        update3DHandles()
+    end)
+end
+
+ResetBtn.MouseButton1Click:Connect(function()
+    local char = getCharacter()
+    for _, part in pairs(char:GetChildren()) do
+        if part:IsA("BasePart") then
+            local motor = part:FindFirstChildOfClass("Motor6D") or char.Torso:FindFirstChild(part.Name .. "Joint")
+            if motor then motor.C0 = CFrame.new(motor.C0.Position) end
+        end
+    end
+    update3DHandles()
+end)
+
+ApplyBtn.MouseButton1Click:Connect(function()
+    if active3DHandle then active3DHandle:Destroy() end
+    selectedLimbName = nil
+    for _, btn in pairs(limbButtons) do btn.BorderColor3 = Color3.fromRGB(0, 0, 0) end
+end)
+
+OverrideToggle.MouseButton1Click:Connect(function()
+    local char = getCharacter()
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    local animateScript = char:FindFirstChild("Animate")
+    overridesActive = not overridesActive
+    
+    if overridesActive then
+        OverrideToggle.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
+        OverrideToggle.Text = "Override Anims: ON"
+        if humanoid then
+            for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do track:Stop(0.1) end
+        end
+        if animateScript then
+            for _, val in pairs(animateScript:GetChildren()) do
+                if val:IsA("StringValue") then
+                    originalAnims[val.Name] = {}
+                    for _, anim in pairs(val:GetChildren()) do
+                        if anim:IsA("Animation") then
+                            originalAnims[val.Name][anim.Name] = anim.AnimationId
+                            anim.AnimationId = ""
+                        end
+                    end
+                end
+            end
+        end
+    else
+        OverrideToggle.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+        OverrideToggle.Text = "Override Anims: OFF"
+        if animateScript then
+            for _, val in pairs(animateScript:GetChildren()) do
+                if val:IsA("StringValue") and originalAnims[val.Name] then
+                    for _, anim in pairs(val:GetChildren()) do
+                        if anim:IsA("Animation") and originalAnims[val.Name][anim.Name] then
+                            anim.AnimationId = originalAnims[val.Name][anim.Name]
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
