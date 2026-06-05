@@ -1,19 +1,22 @@
--- Delta Executor: Full Pose Editor (Fixed Auto-Load Bug)
+-- Delta Executor: Full Pose Editor (Camera Lock & Auto-Load Patched)
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
+-- 1. CLEAN UP PREVIOUS RUNS
 if CoreGui:FindFirstChild("PoseEditor_Final") then
     CoreGui.PoseEditor_Final:Destroy()
 end
 
+-- 2. CORE SCREEN LAYER
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "PoseEditor_Final"
 pcall(function() ScreenGui.Parent = CoreGui end)
 if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
+-- Global States
 local selectedLimbName = nil
 local currentToolMode = "Rotate"
 local active3DHandle = nil
@@ -77,11 +80,11 @@ function update3DHandles()
         arcs.MouseButton1Down:Connect(function() 
             if motor then 
                 startC0 = motor.C0 
-                lockCamera()
+                lockCamera() -- Prevents screen movement while dragging slider
             end 
         end)
         
-        arcs.MouseButton1Up:Connect(unlockCamera)
+        arcs.MouseButton1Up:Connect(unlockCamera) -- Restores panning immediately on release
 
         arcs.MouseAxisChanged:Connect(function(axis, relativeAngle)
             if motor and startC0 then
@@ -103,11 +106,11 @@ function update3DHandles()
         arrows.MouseButton1Down:Connect(function() 
             if motor then 
                 startC0 = motor.C0 
-                lockCamera()
+                lockCamera() -- Prevents screen movement while dragging slider
             end 
         end)
         
-        arrows.MouseButton1Up:Connect(unlockCamera)
+        arrows.MouseButton1Up:Connect(unlockCamera) -- Restores panning immediately on release
 
         arrows.MouseDrag:Connect(function(face, distance)
             if motor and startC0 then
@@ -220,7 +223,7 @@ SavedPosesLaunchBtn.Parent = MainFrame
 local slCorner = Instance.new("UICorner") slCorner.CornerRadius = UDim.new(0, 12) slCorner.Parent = SavedPosesLaunchBtn
 
 -- ==========================================
--- 6. PRESET GRID OVERLAY MENU (Fixed Grid Structure)
+-- 6. PRESET GRID OVERLAY MENU
 -- ==========================================
 local PresetMenu = Instance.new("Frame")
 PresetMenu.Size = UDim2.new(0, 320, 0, 360)
@@ -464,4 +467,3 @@ OverrideToggle.MouseButton1Click:Connect(function()
         end
     end
 end)
-
